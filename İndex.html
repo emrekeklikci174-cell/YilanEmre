@@ -1,0 +1,274 @@
+<!DOCTYPE html><html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EMRENAKE — Yılan Oyunu</title>
+  <style>
+    :root {
+      --bg: #0b0f13;
+      --panel: #121820;
+      --accent: #22c55e; /* yeşil */
+      --accent-dark: #16a34a;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --danger: #ef4444;
+      --grid: #1f2937;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px; background: radial-gradient(1200px 600px at 10% -10%, #0e141b, var(--bg));
+      color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      display: grid; place-items: center;
+    }
+    .wrap { width: min(680px, 100%); }
+    h1 {
+      margin: 0 0 12px; text-align: center; letter-spacing: 2px; font-weight: 800; font-size: clamp(28px, 4vw, 44px);
+      background: linear-gradient(90deg, #34d399, #86efac 50%, #34d399);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+      text-shadow: 0 2px 18px rgba(34, 197, 94, 0.18);
+    }
+    .panel {
+      background: linear-gradient(180deg, #0f1721, var(--panel));
+      border: 1px solid #1f2937; border-radius: 18px; padding: 16px; box-shadow: 0 8px 30px rgba(0,0,0,.35);
+    }
+    .topbar { display:flex; gap:12px; align-items:center; justify-content:center; flex-wrap: wrap; }
+    .stat { padding: 8px 12px; border: 1px solid #263244; border-radius: 12px; background:#0c121a; }
+    .label { color: var(--muted); font-size: 12px; display:block; }
+    .val { font-weight:700; font-variant-numeric: tabular-nums; }.controls { display:flex; gap:8px; flex-wrap: wrap; justify-content:center; }
+button, select {
+  appearance: none; border: 1px solid #243142; background: #0f1620; color: var(--text);
+  padding: 10px 14px; border-radius: 12px; font-weight: 600; cursor: pointer; transition: .15s ease;
+}
+button:hover { transform: translateY(-1px); }
+.primary { background: linear-gradient(180deg, var(--accent), var(--accent-dark)); border-color: var(--accent-dark); color:#051a0e; }
+.danger { background: linear-gradient(180deg, #fb7185, #ef4444); border-color: #b91c1c; color:#190607; }
+
+.canvas-wrap { position: relative; margin-top: 14px; display:grid; place-items:center; }
+canvas { background: #0a0f14; border-radius: 16px; border:1px solid #1f2937; box-shadow: inset 0 0 0 1px #0b1220, 0 8px 30px rgba(0,0,0,.3); }
+
+/* mobil ok tuşları */
+.dpad { display: none; gap:8px; margin-top: 12px; }
+.drow { display:flex; gap:8px; justify-content:center; }
+.dpad button { width:64px; height:48px; font-weight:800; }
+@media (max-width: 560px) {
+  .dpad { display:grid; }
+}
+
+.hint { text-align:center; color: var(--muted); font-size: 12px; margin-top:8px; }
+
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>EMRENAKE</h1>
+    <div class="panel">
+      <div class="topbar" role="group" aria-label="Bilgi Çubuğu">
+        <div class="stat" aria-live="polite"><span class="label">Skor</span><span class="val" id="score">0</span></div>
+        <div class="stat"><span class="label">Rekor</span><span class="val" id="best">0</span></div>
+        <div class="controls">
+          <button id="start" class="primary">Başlat / Duraklat</button>
+          <button id="restart">Yeniden Başlat</button>
+          <select id="speed" title="Hız">
+            <option value="120">Yavaş</option>
+            <option value="90" selected>Orta</option>
+            <option value="60">Hızlı</option>
+            <option value="45">Çılgın</option>
+          </select>
+        </div>
+      </div><div class="canvas-wrap">
+    <canvas id="game" width="420" height="420" aria-label="Oyun alanı" role="img"></canvas>
+  </div>
+
+  <div class="dpad" aria-label="Dokunmatik Kontroller">
+    <div class="drow">
+      <button data-dir="U">▲</button>
+    </div>
+    <div class="drow">
+      <button data-dir="L">◀</button>
+      <button data-dir="D">▼</button>
+      <button data-dir="R">▶</button>
+    </div>
+  </div>
+  <div class="hint">Ok tuşları / WASD ile oyna. Mobilde butonları kullan. Duvara veya kendine çarparsan oyun biter.</div>
+</div>
+
+  </div>  <script>
+    // --- Oyun Ayarları ---
+    const CELL = 20; // hücre boyutu (px)
+    const GRID = 20; // 20x20 hücre
+    const CANVAS_SIZE = CELL * GRID; // 400
+
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    // Canvas'ı kaba padding ile daha hoş hizala
+    canvas.width = CANVAS_SIZE + 20;
+    canvas.height = CANVAS_SIZE + 20;
+
+    // Oyun durumu
+    let snake, dir, food, score, best, loop, tickMs = parseInt(document.getElementById('speed').value, 10), running = false, nextDir = null;
+
+    // Rekor
+    best = parseInt(localStorage.getItem('emrenakeHighScore') || '0', 10);
+    document.getElementById('best').textContent = best;
+
+    function resetGame() {
+      snake = [ {x:8, y:10}, {x:7, y:10}, {x:6, y:10} ];
+      dir = {x:1, y:0};
+      nextDir = null;
+      score = 0;
+      placeFood();
+      updateScore();
+      draw();
+    }
+
+    function placeFood() {
+      do {
+        food = { x: Math.floor(Math.random()*GRID), y: Math.floor(Math.random()*GRID) };
+      } while (snake.some(s => s.x === food.x && s.y === food.y));
+    }
+
+    function updateScore() {
+      document.getElementById('score').textContent = score;
+      if (score > best) {
+        best = score;
+        localStorage.setItem('emrenakeHighScore', String(best));
+        document.getElementById('best').textContent = best;
+      }
+    }
+
+    function gameLoop() {
+      step();
+      draw();
+    }
+
+    function step() {
+      // yön değişikliğini tek hamlede uygula (ters yöne dönmeyi engelle)
+      if (nextDir) { dir = nextDir; nextDir = null; }
+
+      const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+
+      // Duvar çarpışması
+      if (head.x < 0 || head.x >= GRID || head.y < 0 || head.y >= GRID) {
+        return gameOver();
+      }
+      // Kendiyle çarpışma
+      if (snake.some((s, i) => i && s.x === head.x && s.y === head.y)) {
+        return gameOver();
+      }
+
+      snake.unshift(head);
+
+      // Yem yeme
+      if (head.x === food.x && head.y === food.y) {
+        score += 10;
+        updateScore();
+        placeFood();
+      } else {
+        snake.pop();
+      }
+    }
+
+    function gameOver() {
+      pause();
+      // küçük sarsma efekti
+      canvas.animate([
+        { transform: 'translateX(0)' },
+        { transform: 'translateX(-6px)' },
+        { transform: 'translateX(6px)' },
+        { transform: 'translateX(0)' }
+      ], { duration: 180, iterations: 1, easing: 'ease-in-out' });
+    }
+
+    // Çizim
+    function draw() {
+      // arka plan çerçeve
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.save();
+      ctx.translate(10,10);
+
+      // grid
+      ctx.fillStyle = '#0b1220';
+      ctx.fillRect(0,0,CANVAS_SIZE,CANVAS_SIZE);
+      ctx.strokeStyle = '#172133';
+      ctx.lineWidth = 1;
+      for (let i=0; i<=GRID; i++) {
+        ctx.beginPath(); ctx.moveTo(i*CELL, 0); ctx.lineTo(i*CELL, CANVAS_SIZE); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, i*CELL); ctx.lineTo(CANVAS_SIZE, i*CELL); ctx.stroke();
+      }
+
+      // food
+      drawRoundedRect(food.x*CELL+2, food.y*CELL+2, CELL-4, CELL-4, 6, '#ef4444');
+
+      // snake
+      snake.forEach((p, idx) => {
+        const isHead = idx === 0;
+        const color = isHead ? '#34d399' : '#22c55e';
+        drawRoundedRect(p.x*CELL+2, p.y*CELL+2, CELL-4, CELL-4, isHead?7:5, color);
+      });
+
+      ctx.restore();
+    }
+
+    function drawRoundedRect(x,y,w,h,r,color){
+      ctx.fillStyle = color; ctx.beginPath();
+      ctx.moveTo(x+r, y);
+      ctx.arcTo(x+w, y, x+w, y+h, r);
+      ctx.arcTo(x+w, y+h, x, y+h, r);
+      ctx.arcTo(x, y+h, x, y, r);
+      ctx.arcTo(x, y, x+w, y, r);
+      ctx.closePath(); ctx.fill();
+    }
+
+    // Kontroller
+    function setDir(nx, ny) {
+      // ters yöne dönmeyi engelle
+      if (nx === -dir.x && ny === -dir.y) return;
+      nextDir = {x:nx, y:ny};
+    }
+
+    window.addEventListener('keydown', (e) => {
+      const k = e.key.toLowerCase();
+      if ([ 'arrowup','w' ].includes(k)) setDir(0,-1);
+      else if ([ 'arrowdown','s' ].includes(k)) setDir(0,1);
+      else if ([ 'arrowleft','a' ].includes(k)) setDir(-1,0);
+      else if ([ 'arrowright','d' ].includes(k)) setDir(1,0);
+      else if (k === ' ') toggle();
+    });
+
+    // dokunmatik butonlar
+    document.querySelectorAll('.dpad [data-dir]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const d = btn.getAttribute('data-dir');
+        if (d === 'U') setDir(0,-1);
+        if (d === 'D') setDir(0,1);
+        if (d === 'L') setDir(-1,0);
+        if (d === 'R') setDir(1,0);
+      });
+    });
+
+    // Butonlar
+    document.getElementById('start').addEventListener('click', toggle);
+    document.getElementById('restart').addEventListener('click', () => { resetGame(); if (!running) toggle(true); });
+    document.getElementById('speed').addEventListener('change', (e) => {
+      tickMs = parseInt(e.target.value, 10);
+      if (running) { pause(); run(); }
+    });
+
+    function run() {
+      running = true;
+      loop = setInterval(gameLoop, tickMs);
+    }
+    function pause() {
+      running = false;
+      clearInterval(loop);
+    }
+    function toggle(forceRun=false) {
+      if (forceRun) { pause(); run(); return; }
+      running ? pause() : run();
+    }
+
+    // Başlat
+    resetGame();
+  </script></body>
+</html>
